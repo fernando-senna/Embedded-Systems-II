@@ -229,9 +229,11 @@ int main(int argc, char *argv[])
 			{
 				do
 				{
-					cout << "Do you wish to START? (Y\\N) ";
-					cin.ignore();
-					cin >> start;
+					printf("Do you wis to Start? (Y\\N) ");
+					scanf(" %c", &start);
+//					cout << "Do you wish to START? (Y\\N) ";
+//					cin.ignore();
+//					cin >> start;
 
 				} while (start == 'n' || start == 'N');
 
