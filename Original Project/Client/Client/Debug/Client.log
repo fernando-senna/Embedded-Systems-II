@@ -1,0 +1,5 @@
+﻿  Client.cpp
+c:\users\fernando\documents\uta\cse 4342\project\client\client.cpp(338): warning C4018: '<': signed/unsigned mismatch
+c:\users\fernando\documents\uta\cse 4342\project\client\client.cpp(354): warning C4018: '<': signed/unsigned mismatch
+c:\users\fernando\documents\uta\cse 4342\project\client\client.cpp(379): warning C4018: '<': signed/unsigned mismatch
+  Client.vcxproj -> C:\Users\Fernando\Documents\UTA\CSE 4342\Project\Client\Debug\Client.exe
