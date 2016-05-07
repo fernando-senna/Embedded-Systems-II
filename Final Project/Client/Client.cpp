@@ -70,7 +70,10 @@ WSADATA wsaData;
 /* Client Global Variables */
 bool done = true;
 int clientCounter = 0;
+int serverCounter = 0;
 double filterCoefficient[COEF_MAX];
+double sampleRate = 0.0;
+char saveFile[500];
 /* End Client Global Variables */
 
 /* Thread to interface with the ProfileClient */
@@ -91,10 +94,8 @@ int main(int argc, char *argv[])
 	struct sockaddr_in saddr;
 	struct hostent *hp;
 
-	double sampleRate;
 	char buffer[COEF_MAX] = "";
 	char inputChar[100] = "";
-	char saveFile[250];
 	char filterFile[250];
 	char start;
 	int res = 0;
@@ -270,15 +271,47 @@ VOID client_iface_thread(LPVOID parameters) //LPVOID parameters)
 	int saddr_len;
 	int counter = 0;
 	char ParamBuffer[110];
-
-
+	double temp;
+	int maxVal = (int)sampleRate;
 
 	while (ParamBuffer[0] != '!')
 	{
 		memset(ParamBuffer, 0, sizeof(ParamBuffer));
 		saddr_len = sizeof(saddr);
-		retval = recvfrom(comm->cmdrecvsock, ParamBuffer, sizeof(ParamBuffer), 0, (struct sockaddr *)&saddr, &saddr_len);
-		printf("%s \n", ParamBuffer);
+
+		recv(comm->cmdrecvsock, (char *)&serverCounter, sizeof(serverCounter), 0);
+
+		//Displays Real Time Data Acquisition Status
+		if (serverCounter == 0)
+		{
+			retval = recvfrom(comm->cmdrecvsock, ParamBuffer, sizeof(ParamBuffer), 0, (struct sockaddr *)&saddr, &saddr_len);
+			printf("%s \n", ParamBuffer);
+		}
+
+		//Stores the convolution result in a csv file & the rest of the calculations on a txt file called calculations
+		if (serverCounter == 1)
+		{
+			ofstream myFile2;
+			myFile2.open("calculations.txt", ofstream::app);
+
+			retval = recvfrom(comm->cmdrecvsock, ParamBuffer, sizeof(ParamBuffer), 0, (struct sockaddr *)&saddr, &saddr_len);
+			myFile2 << ParamBuffer << endl;
+
+			myFile2.close();
+			cout << ParamBuffer << endl;
+
+			ofstream myFile;
+			myFile.open(saveFile, ofstream::app);
+
+			int len = maxVal + COEF_MAX - 1;
+			for (counter = 0; counter < len; counter++)
+			{
+				recv(comm->cmdrecvsock, (char *)&temp, sizeof(temp), 0);
+				myFile << temp << ",";
+			}
+		
+			myFile.close();
+		}
 	}
 
 	done = false;

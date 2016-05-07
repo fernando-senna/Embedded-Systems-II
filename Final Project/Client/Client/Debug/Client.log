@@ -1,1 +1,6 @@
-﻿  Client.vcxproj -> C:\Users\Fernando\Documents\UTA\CSE 4342\Final Project\Client\Debug\Client.exe
+﻿  Client.cpp
+c:\users\fernando\documents\github\embedded-systems-ii\final project\client\client.cpp(196): warning C4552: '+': operator has no effect; expected operator with side-effect
+c:\users\fernando\documents\github\embedded-systems-ii\final project\client\client.cpp(369): warning C4018: '<': signed/unsigned mismatch
+c:\users\fernando\documents\github\embedded-systems-ii\final project\client\client.cpp(385): warning C4018: '<': signed/unsigned mismatch
+c:\users\fernando\documents\github\embedded-systems-ii\final project\client\client.cpp(410): warning C4018: '<': signed/unsigned mismatch
+  Client.vcxproj -> C:\Users\Fernando\Documents\GitHub\Embedded-Systems-II\Final Project\Client\Debug\Client.exe
