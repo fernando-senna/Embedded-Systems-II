@@ -34,11 +34,9 @@ using namespace std;
 #define ARG_NONE		1
 #define ARG_NUMBER		2
 
-#define MAX				101
-#define MAX_BUFFER		2000
-#define MAX_BUF			1100
 #define RES				16
 #define SWITCH_MIN		45000
+#define FILTER_LEN		101
 
 //Server Structures
 typedef struct sp_comm {
@@ -82,18 +80,24 @@ int firstVal = 1;
 int currVal = 0;
 int serverCounter = 0;
 int clientCounter = 0;
+int lengthResult = 0;
+int display = 0;
 
-double filterCoefficient[MAX];
+double filterCoefficient[FILTER_LEN];
 double sampleRate;
-double buffer[MAX_BUFFER];
+
+double *convolutionResult;
+double *currBuffer;
+double *prevBuffer;
+
+double transient = 0.0;
 
 bool done = true;
 bool beginSampling = false;
 bool switchStatus = true;		//True = On. False = Off
+bool switchFlag = true;
 
 char inputChar[110] = "";
-
-sp_comm_t comm;
 
 DBL gain = 1.0;
 DBL max = 1;
@@ -120,15 +124,17 @@ PWORD pBuffer = NULL;
 struct sp_struct profiler;
 struct sockaddr_in saddr;
 struct hostent *hp;
+sp_comm_t comm;
 
 /* Function Prototypes */
 void set_dt9816(void);
 void activate_led(int num);
-char *calculations(double arrayA[], double arrayB[]);
-double minimum(double values[]);
-double maximum(double values[]);
-double average(double values[], int len);
-double variance(double values[]);
+double minimum();
+double maximum();
+double average();
+double variance();
+void convolution(double *currBuf, int lenCurr, double coef[], double *convolutionResult);
+//void realTimeConvolution(double currBuf[], int lenCurr, double prevBuf[], int lenPrev, double coef[], int lenCoef, double convResult[], int lenResult);
 /* End Function Prototypes */
 
 /* DT9816 Setup */
@@ -212,14 +218,14 @@ LRESULT WINAPI
 WndProc(HWND hWnd, UINT msg, WPARAM hAD, LPARAM lParam)
 {
 	int i, j;
-
+	i = j = 0;
 	switch (msg)
 	{
 		case OLDA_WM_BUFFER_DONE:
 			HBUF hBuf;
 
 			CHECKERROR(olDaGetBuffer((HDASS)hAD, &hBuf));
-
+		
 			if (hBuf && beginSampling == true)
 			{
 				olDaGetRange((HDASS)hAD, &max, &min);
@@ -235,56 +241,94 @@ WndProc(HWND hWnd, UINT msg, WPARAM hAD, LPARAM lParam)
 
 				else
 				{
-					olDmGetBufferPtr(hBuf, (LPVOID *)&pBuffer32);
+					olDmGetBufferPtr(hBuf, (LPVOID *)&pBuffer);
 					switchValue = pBuffer[sample - 1];
-				
+
+					ULNG newValue;
+					double newVolt;
+
+					currBuffer = (double *)malloc(sizeof(double) * (int)sampleRate);
+					//prevBuffer = (double *)malloc(sizeof(double) * (int)sampleRate);
+					convolutionResult = (double *)malloc(sizeof(double) * ((int)sampleRate + FILTER_LEN - 1));
+					
+					for (i = 0; i < sample; i += 2)
+					{
+
+							newValue = pBuffer[i];
+							newVolt = ((float)max - (float)min) / (1L << resolution) * newValue + (float)min;
+							currBuffer[j] = newVolt;
+
+						j++;
+					}
+
+					
 					if (switchValue >= SWITCH_MIN)
 					{
-						if (switchStatus == true)
+						if (switchFlag == true)
 						{
+							int val = 0;
+
+							send(comm->datasock, (char *)&val, sizeof(val), 0);
+							
 							sprintf(inputChar, "Real Time Data Acquisition Started!");
+
+							if (display == 0)
+							{
+								display = 1;
+								cout << inputChar << endl;
+							}
+
 							send(comm->datasock, inputChar, sizeof(inputChar), 0);
+							
+							//LED ON - DATA ACQUISITION STARTED
 							activate_led(1);
 						}
 
-						i = j = 0;
-						while (i < sample)
-						{
-							value = pBuffer[i];
-							volt = ((float)max - (float)min) / (1L << resolution) * value + (float)min;
-							buffer[j] = volt;
+						//Convolution
+						int convLen = (int)sampleRate + FILTER_LEN - 1;
+						convolution(currBuffer, (int)sampleRate, filterCoefficient, convolutionResult);
+						//realTimeConvolution();
 
-							j++;
-							i += 2;
-						}
-
-						//convolution
+						//Calculates Max, Min, Avg, and Variance.
+						//Sends the results to the client
+						int serverFlag = 1;
+						send(comm->datasock, (char *)&serverFlag, sizeof(serverFlag), 0);
+						sprintf(inputChar, "Min = %.4f Max = %.4f Avg = %.4f Var = %.4f", minimum(), maximum(), average(), variance());
+						send(comm->datasock, inputChar, sizeof(inputChar), 0);
+						
+						//Sends the convolution result to the client
+						for (int index = 0; index < (2000 + 101 - 1); index++)
+							send(comm->datasock, (char *)&convolutionResult[index], sizeof(convolutionResult[index]), 0);
+						
+						//Frees memory in order to avoid the program from crashing and preventing memory leaks
+						free(currBuffer);
+						free(convolutionResult);
+						
 						switchStatus = false;
+						switchFlag = false;
 					}
 
 					else
 					{
+						//LED OFF - DATA ACQUISITION STOPPED
 						activate_led(0);
 
 						if (switchStatus == false)
 						{
+							int val = 0;
+
+							send(comm->datasock, (char *)&val, sizeof(val), 0);
+
 							sprintf(inputChar, "Real Time Data Acquisition Stopped!");
 							send(comm->datasock, inputChar, sizeof(inputChar), 0);
 
 							switchStatus = true;
+							switchFlag = true;
 						}
 					}
 				}
 				
 				olDaPutBuffer((HDASS)hAD, hBuf);
-
-				if (encoding != OL_ENC_BINARY)
-				{
-					value ^= 1L << (resolution - 1);
-					value &= (1L << resolution) - 1;
-					switchValue ^= 1L << (resolution - 1);
-					switchValue &= (1L << resolution) - 1;
-				}
 			}
 
 			break;
@@ -342,11 +386,11 @@ int main(void)
 	int res = 0;
 
 	//DT9816 Setup
-	//set_dt9816();
+	set_dt9816();
 
 	//Server Setup
 	memset(&profiler, 0, sizeof(profiler));
-	sp_comm_t comm = &profiler.comm;
+   comm = &profiler.comm;
 
 	if ((res = WSAStartup(0x202, &wsaData)) != 0)
 	{
@@ -368,10 +412,10 @@ int main(void)
 	hp->h_length = 4;
 
 	//Broadcast in 255.255.255.255 Network
-	hp->h_addr_list[0][0] = (signed char)255;	//192;129
-	hp->h_addr_list[0][1] = (signed char)255;	//168;107
-	hp->h_addr_list[0][2] = (signed char)255;	//0;255  
-	hp->h_addr_list[0][3] = (signed char)255;	//140;255
+	hp->h_addr_list[0][0] = (signed char)169;	//192;129
+	hp->h_addr_list[0][1] = (signed char)254;	//168;107
+	hp->h_addr_list[0][2] = (signed char)56;	//0;255  
+	hp->h_addr_list[0][3] = (signed char)144;	//140;255
 	hp->h_addr_list[0][4] = 0;
 	
 	//Setup a Socket for Broadcasting Data
@@ -511,7 +555,7 @@ int main(void)
 VOID client_iface_thread(LPVOID parameters) //LPVOID parameters)
 {
 	sp_struct_t profiler = (sp_struct_t)parameters;
-	sp_comm_t comm = &profiler->comm;
+	comm = &profiler->comm;
 	INT retval;
 	struct sockaddr_in saddr;
 	int saddr_len;
@@ -533,7 +577,7 @@ VOID client_iface_thread(LPVOID parameters) //LPVOID parameters)
 		{
 			recv(comm->cmdrecvsock, (char *)&sampleRate, sizeof(sampleRate), 0);
 
-			for (int index = 0; index < MAX; index++)
+			for (int index = 0; index < FILTER_LEN; index++)
 			{
 				recv(comm->cmdrecvsock, (char *)&temp, sizeof(temp), 0);
 				filterCoefficient[index] = temp;
@@ -551,6 +595,10 @@ VOID client_iface_thread(LPVOID parameters) //LPVOID parameters)
 
 			if (strcmp(start, "Start") == 0)
 			{
+				int val = 0;
+
+				send(comm->datasock, (char *)&val, sizeof(val), 0);
+
 				sprintf(inputChar, "\nSampling Process Started! Waiting for the user to press the switch!");
 
 				send(comm->datasock, inputChar, sizeof(inputChar), 0);
@@ -618,21 +666,22 @@ void set_dt9816(void)
  *	If the value compared is less than the arbitrary value, then that number replaces the arbitrary value.
  *	Once the loop finishes, the function returns the minimum value of the array.
  */
-double minimum(double values[])
+double minimum()
 {
 	int len, index;
 	double min;
 
-	len = MAX_BUF - 1;
-	index = 200;
-	min = values[200];	//Sets arbitrary minimum value
+	len = (int)sampleRate + FILTER_LEN - 1;
+	index = 100;					//Reads data after 100 values
+
+	min = convolutionResult[100];	//Sets arbitrary minimum value
 
 	//Loops thru the array
-	while (index < (len - 200))
+	while (index < (len - 100))
 	{
 		//Checks if the value in the array is less than the arbitrary value
-		if (values[index] < min)
-			min = values[index];
+		if (convolutionResult[index] < min)
+			min = convolutionResult[index];
 
 		index++;
 	}
@@ -642,48 +691,55 @@ double minimum(double values[])
 
 /*
  *	Function: maximum
- *	Parameter(s): values - an array of type double that stores the results collected from the DT9816
+ *	Parameter(s): void
  *	Returns: The maximum value from the array
  *	Description: The function sets an arbitrary maximum value, loops thru the entire array comparing values
  *	looking for the largest number of the array and updates the max variable.
  */
-double maximum(double values[])
+double maximum()
 {
 	int len, index;
 	double max;
 
-	len = MAX_BUF - 1;
-	max = values[200];	//Sets arbitrary maximum value
-
-						//Loops thru the entire array looking for the max value & updating the max variable
-						//if the value compared is grater than the arbitrary max
-	for (index = 200; index < len - 200; index++)
-		if (values[index] > max)
-			max = values[index];
+	max = convolutionResult[200];	//Sets arbitrary maximum value
+	
+	// (-2) due to first removing 1 from the filter coef and 2nd removing 1 from the max value.
+	// (-200) because we want to get every 200 values
+	len = (int)sampleRate + FILTER_LEN - 1 - 1 - 200;
+	
+	//Loops thru the entire array looking for the max value & updating the max variable
+	//if the value compared is grater than the arbitrary max
+	for (index = 200; index < len; index++)
+		if (convolutionResult[index] > max)
+			max = convolutionResult[index];
 
 	return max;
 }
 
 /*
  *	Function: average
- *	Parameter(s): values - an array of type double that stores the results collected from the DT9816
+ *	Parameter(s): void
  *	Returns: The average result of the data collected.
  *	Description: The function takes the double array with the data collected, then sums all of the
  *	values, and finally calculates and returns the average.
  */
-double average(double values[], int len)
+double average()
 {
-	int index;
+	int index, len, division;
 	double sum;
 
+	// (-1) due to removing 1 value from filter coef and -100 because we want to get
+	// data after the first 100 numbers read
+	len = (int)sampleRate + FILTER_LEN - 1 - 100;
+	division = (int)sampleRate + FILTER_LEN - 1;
 	sum = 0.0;
 
 	//Adds all of the values of the array
-	for (index = 100; index < len - 100; index++)
-		sum = sum + values[index];
+	for (index = 100; index < len; index++)
+		sum = sum + convolutionResult[index];
 
 	//Calculates & Returns the average
-	return sum / len;
+	return sum / division;
 }
 
 /*
@@ -695,21 +751,23 @@ double average(double values[], int len)
  *	average again to calculate the variance.
  *	Source: http://www.mathsisfun.com/data/standard-deviation.html
  */
-double variance(double values[])
+double variance()
 {
-	int len, index;
+	int index, len, division;
 	double firstAvg, sum;
 
-	len = 1099;
+	// -1 due to filter coefficient & -200 due to reading after the 1st 200 values
+	len = (int)sampleRate + FILTER_LEN - 1 - 200;
+	division = (int)sampleRate + FILTER_LEN - 1;
 	firstAvg = sum = 0.0;
 
-	firstAvg = average(values, len);
+	firstAvg = average();
 
-	for (index = 200; index < len - 200; index++)
-		sum = sum + pow((values[index] - firstAvg), 2);
+	for (index = 200; index < len; index++)
+		sum = sum + pow((convolutionResult[index] - firstAvg), 2);
 
 	//Calculates & Returns the Variance (Average)
-	return sum / len;
+	return sum / division;
 }
 
 /*
@@ -755,23 +813,96 @@ void activate_led(int number)
 	CHECKERROR(olDaTerminate(board.hdrvr));
 }
 
-char *calculations(double arrayA[], double arrayB[])
+
+/*
+ *	Function: convolution
+ *	Parameter(s): 	currBuffer - array with the data sampled using the DT9816.
+ *					lenCurr - length of the current buffer.
+ *					filterCoef - array witt the data read from the file b.txt
+ *					lenCoef - length of the filterCoef array
+ *					resut - array storing the result of the convolution
+ *					lenResult - length of the convolution result
+ *	Returns:		void
+ *	Description:	This function calculates the convolution of the data at
+ *					the current buffer using the filter coefficient received
+ *					from the client.
+ *					The function then stores the sum of the convolution in
+ *					the array convolutionResult.
+ *	Source:			http://toto-share.com/2011/11/cc-convolution-source-code/
+ */
+void convolution(double *currBuf, int lenCurr, double coef[], double *convolutionResult)
 {
-	//char value[250];
-	double min, max, avg, var;
-	double temp[2000 + 100 - 1];
+	int i, j, k, newConv;
+	double sum;
+	
 
-	min = max = avg = var = 0;
+	newConv = (int)sampleRate + FILTER_LEN - 1;
 
-	//convolution(arrayA, arrayB, 2000, 100, temp);
+	for (i = 0; i < newConv; i++)
+	{
+		k = i;
+		sum = 0;
 
-	min = minimum(temp);
-	max = maximum(temp);
-	avg = average(temp, 2099);
-	var = variance(temp);
+		for (j = 0; j < FILTER_LEN; j++)
+		{
+			if (k >= 0 && k < (int)sampleRate)
+			{
+				sum = sum + (currBuf[k] * coef[j]);
+			}
 
-	sprintf(inputChar, "Minimum = %.2f - Maximum = %.2f - Average = %.2f - Variance = %.2f", min, max, avg, var);
+			k = k - 1;
+			convolutionResult[i] = sum;
+		}
+	}
+}
 
-	return inputChar;
-	//convolution();
+/*
+ *
+ */
+void realTimeConvolution(double currBuf[], int lenCurr, double prevBuf[], int lenPrev,double coef[], int lenCoef, double convResult[], int lenResult)
+{
+	int i, j, k;
+	double sum;
+	double *buffer;
+
+	buffer = (double *)malloc(sizeof(double) * (lenCurr + lenPrev));
+
+	//Merges both buffers together
+	j = k = 0;
+	for (i = 0; i < (lenCurr + lenPrev); i++)
+	{
+		if (i < lenCurr)
+		{
+			buffer[i] = prevBuf[j];
+			j++;
+		}
+
+		else
+		{
+			buffer[i] = currBuf[k];
+			k++;
+		}
+	}
+
+	//Real Time Convolution Calculation
+	for (i = 0; i < lenResult; i++)
+	{
+		k = i;
+		sum = 0;
+
+		for (j = 0; j < lenCoef; j++)
+		{
+			if (k >= 0 && k < lenCurr + lenPrev)
+				sum = sum + (buffer[k] * coef[j]);
+
+			k = k - 1;
+			convResult[i] = sum;
+		}
+
+		//Stores transient for the next convolution
+		if (i == lengthResult - 1)
+			transient = sum;
+	}
+
+	free(buffer);
 }

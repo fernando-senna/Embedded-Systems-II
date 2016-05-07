@@ -1,8 +1,8 @@
 ﻿  Server.cpp
-Server.cpp(164): warning C4005: 'CHECKERROR': macro redefinition
-  Server.cpp(152): note: see previous definition of 'CHECKERROR'
-Server.cpp(251): warning C4018: '<': signed/unsigned mismatch
-Server.cpp(469): warning C4244: 'argument': conversion from 'double' to 'DWORD', possible loss of data
-Server.cpp(516): warning C4101: 'saddr': unreferenced local variable
-Server.cpp(515): warning C4101: 'retval': unreferenced local variable
-  Server.vcxproj -> C:\Users\Fernando\Documents\UTA\CSE 4342\Final Project\Server\.\Debug\Server.exe
+Server.cpp(170): warning C4005: 'CHECKERROR': macro redefinition
+  Server.cpp(158): note: see previous definition of 'CHECKERROR'
+Server.cpp(254): warning C4018: '<': signed/unsigned mismatch
+Server.cpp(513): warning C4244: 'argument': conversion from 'double' to 'DWORD', possible loss of data
+Server.cpp(560): warning C4101: 'saddr': unreferenced local variable
+Server.cpp(559): warning C4101: 'retval': unreferenced local variable
+  Server.vcxproj -> C:\Users\Fernando\Documents\GitHub\Embedded-Systems-II\Final Project\Server\.\Debug\Server.exe
